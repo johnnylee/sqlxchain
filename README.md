@@ -15,3 +15,4 @@ err := db.Context().Begin().
     Commit().
     Err()
 ```
+The error is propagated through each call. Once an error occurs, no other action is performed. If there was an error before Commit gets called, then Commit will perform a rollback. 
