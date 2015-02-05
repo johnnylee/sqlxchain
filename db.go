@@ -2,7 +2,6 @@ package sqlxchain
 
 import (
 	"database/sql"
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"github.com/johnnylee/util"
 )
@@ -11,31 +10,38 @@ var log = util.NewPrefixLogger("SqlxChain")
 
 // SqlxChain is a thin wrapper around a sqlx.DB.
 type SqlxChain struct {
-	Db *sqlx.DB
+	Db           *sqlx.DB
+	errConverter func(error) error
 }
 
 func New(driver, dns string) (*SqlxChain, error) {
 	var err error
 
 	sc := new(SqlxChain)
-	if sc.Db, err = sqlx.Open("mysql", dns); err != nil {
+	if sc.Db, err = sqlx.Open(driver, dns); err != nil {
 		return nil, err
 	}
 
 	return sc, nil
 }
 
+func (sc *SqlxChain) ErrorConverter(f func(error) error) {
+	sc.errConverter = f
+}
+
 func (sc *SqlxChain) Context() *DbContext {
 	ctx := new(DbContext)
 	ctx.db = sc.Db
+	ctx.errConverter = sc.errConverter
 	return ctx
 }
 
 type DbContext struct {
-	db     *sqlx.DB
-	tx     *sqlx.Tx
-	err    error
-	result sql.Result
+	db           *sqlx.DB
+	tx           *sqlx.Tx
+	err          error
+	errConverter func(error) error
+	result       sql.Result
 }
 
 func (d *DbContext) Begin() *DbContext {
@@ -124,5 +130,8 @@ func (d *DbContext) Commit() *DbContext {
 }
 
 func (d *DbContext) Err() error {
+	if d.errConverter != nil {
+		return d.errConverter(d.err)
+	}
 	return d.err
 }
