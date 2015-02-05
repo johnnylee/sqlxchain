@@ -10,7 +10,7 @@ var id int64
 
 err := db.Context().Begin().
     Get(&now, "SELECT UNIX_TIMESTAMP()").
-    Get(&id, "SELECT id FROM employee WHERE should_fire=1 LIMIT 1).
+    Get(&id, "SELECT id FROM employee WHERE is_terrible=1 LIMIT 1").
     Exec("UPDATE employee SET terminated=? WHERE id=?", now, id).
     Commit().
     Err()
