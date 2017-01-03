@@ -3,15 +3,16 @@ package sqlxchain
 import (
 	"database/sql"
 	"github.com/jmoiron/sqlx"
-	"github.com/johnnylee/util"
 )
 
-var log = util.NewPrefixLogger("SqlxChain")
+type ErrorConvertFunc func(err error) error
+type ErrorLogFunc func(err error, format string, v ...interface{})
 
 // SqlxChain is a thin wrapper around a sqlx.DB.
 type SqlxChain struct {
 	Db           *sqlx.DB
-	errConverter func(error) error
+	errConverter ErrorConvertFunc
+	errLogger    ErrorLogFunc
 }
 
 func New(driver, dns string) (*SqlxChain, error) {
@@ -25,14 +26,19 @@ func New(driver, dns string) (*SqlxChain, error) {
 	return sc, nil
 }
 
-func (sc *SqlxChain) ErrorConverter(f func(error) error) {
+func (sc *SqlxChain) ErrorConverter(f ErrorConvertFunc) {
 	sc.errConverter = f
+}
+
+func (sc *SqlxChain) ErrorLogger(f ErrorLogFunc) {
+	sc.errLogger = f
 }
 
 func (sc *SqlxChain) Context() *DbContext {
 	ctx := new(DbContext)
 	ctx.db = sc.Db
 	ctx.errConverter = sc.errConverter
+	ctx.errLogger = sc.errLogger
 	return ctx
 }
 
@@ -40,7 +46,8 @@ type DbContext struct {
 	db           *sqlx.DB
 	tx           *sqlx.Tx
 	err          error
-	errConverter func(error) error
+	errConverter ErrorConvertFunc
+	errLogger    ErrorLogFunc
 	result       sql.Result
 }
 
@@ -106,21 +113,18 @@ func (d *DbContext) RowsAffected(n *int64) *DbContext {
 	return d
 }
 
-func (d *DbContext) LogErr(msg string, args ...interface{}) *DbContext {
-	if d.err != nil {
-		log.Err(d.err, msg, args...)
-	}
-	return d
-}
-
 func (d *DbContext) Commit() *DbContext {
+	if d.tx == nil {
+		return d
+	}
+
 	defer func() {
 		d.tx = nil
 	}()
 
 	if d.err != nil {
 		if err := d.tx.Rollback(); err != nil {
-			log.Err(err, "When rolling back transaction")
+			d.logErr(d.convertErr(err), "When rolling back transaction")
 		}
 		return d
 	}
@@ -129,9 +133,24 @@ func (d *DbContext) Commit() *DbContext {
 	return d
 }
 
-func (d *DbContext) Err() error {
-	if d.errConverter != nil {
-		return d.errConverter(d.err)
+func (d *DbContext) convertErr(err error) error {
+	if err != nil && d.errConverter != nil {
+		err = d.errConverter(err)
 	}
-	return d.err
+	return err
+}
+
+func (d *DbContext) Err() error {
+	return d.convertErr(d.err)
+}
+
+func (d *DbContext) logErr(err error, msg string, args ...interface{}) {
+	if err != nil && d.errLogger != nil {
+		d.errLogger(err, msg, args...)
+	}
+}
+
+func (d *DbContext) LogErr(msg string, args ...interface{}) *DbContext {
+	d.logErr(d.err, msg, args...)
+	return d
 }
